@@ -1,0 +1,4 @@
+/Users/alexcheng/projects/Searching/build/CMakeFiles/SearchingGame.dir
+/Users/alexcheng/projects/Searching/build/CMakeFiles/run.dir
+/Users/alexcheng/projects/Searching/build/CMakeFiles/edit_cache.dir
+/Users/alexcheng/projects/Searching/build/CMakeFiles/rebuild_cache.dir
