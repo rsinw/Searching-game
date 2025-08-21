@@ -1,0 +1,17 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\Alex\projects\Searching-game\build\CMakeFiles\ab64bf0327c72a77f358ac65113f5973\uninstall.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\Users\Alex\projects\Searching-game\build\_deps\raylib-src\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="C:\Users\Alex\projects\Searching-game\build\_deps\raylib-build\CMakeFiles\uninstall" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{D56F53C3-3193-3337-BE00-6572A79AE7ED}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

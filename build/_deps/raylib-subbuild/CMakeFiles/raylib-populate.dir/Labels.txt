@@ -1,0 +1,14 @@
+# Target labels
+ raylib-populate
+# Source files and their labels
+C:/Users/Alex/projects/Searching-game/build/_deps/raylib-subbuild/CMakeFiles/raylib-populate
+C:/Users/Alex/projects/Searching-game/build/_deps/raylib-subbuild/CMakeFiles/40feb722aa40fd5dc57e8c927f268d19/raylib-populate.rule
+C:/Users/Alex/projects/Searching-game/build/_deps/raylib-subbuild/CMakeFiles/d6cd5e5a3754b3c2732a2c96b98b6cec/raylib-populate-complete.rule
+C:/Users/Alex/projects/Searching-game/build/_deps/raylib-subbuild/CMakeFiles/05e365963c9abc4bba4832cabe73d5a8/raylib-populate-build.rule
+C:/Users/Alex/projects/Searching-game/build/_deps/raylib-subbuild/CMakeFiles/05e365963c9abc4bba4832cabe73d5a8/raylib-populate-configure.rule
+C:/Users/Alex/projects/Searching-game/build/_deps/raylib-subbuild/CMakeFiles/05e365963c9abc4bba4832cabe73d5a8/raylib-populate-download.rule
+C:/Users/Alex/projects/Searching-game/build/_deps/raylib-subbuild/CMakeFiles/05e365963c9abc4bba4832cabe73d5a8/raylib-populate-install.rule
+C:/Users/Alex/projects/Searching-game/build/_deps/raylib-subbuild/CMakeFiles/05e365963c9abc4bba4832cabe73d5a8/raylib-populate-mkdir.rule
+C:/Users/Alex/projects/Searching-game/build/_deps/raylib-subbuild/CMakeFiles/05e365963c9abc4bba4832cabe73d5a8/raylib-populate-patch.rule
+C:/Users/Alex/projects/Searching-game/build/_deps/raylib-subbuild/CMakeFiles/05e365963c9abc4bba4832cabe73d5a8/raylib-populate-test.rule
+C:/Users/Alex/projects/Searching-game/build/_deps/raylib-subbuild/CMakeFiles/05e365963c9abc4bba4832cabe73d5a8/raylib-populate-update.rule
