@@ -1,0 +1,2 @@
+Stuffs not really in the right place, but its fine for now. Just move scene to scenes, and battlescene, dungeon scene, etc to their files. 
+I dont think data and assets should be in the main directory, only in build

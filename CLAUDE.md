@@ -90,3 +90,9 @@ The project contains a minimal raylib example that:
 - Cannot use raylib color macros (like RAYWHITE) - must define Color structs manually
 - Game logic should follow the state machine pattern outlined in `docs/rpdesign.md`
 - Save data structure is defined with character stats, inventory, and progress tracking
+
+## Critical Development Approach
+
+**Ask me before making any assumptions about the system. Always ask yourself, am I making an assumption? If you are, end your train of thought and open up the chat for me to respond to your question.**
+
+This prevents over-engineering and ensures implementations match the user's actual requirements.

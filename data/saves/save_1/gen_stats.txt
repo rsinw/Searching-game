@@ -1,3 +1,0 @@
-FLOOR="3"
-x_pos="2"
-y_pos="1"

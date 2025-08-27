@@ -4,9 +4,24 @@
       "Bash(mkdir:*)",
       "Bash(cp:*)",
       "Bash(.buildDebugSearching-game.exe)",
-      "Bash(cmake:*)"
+      "Bash(cmake:*)",
+      "Bash(rm:*)",
+      "Bash(.DebugSearching-game.exe)",
+      "Bash(mv:*)",
+      "Bash(rg:*)",
+      "Bash(./build/Debug/Searching-game.exe)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:stackoverflow.com)",
+      "Bash(timeout:*)",
+      "Bash(taskkill:*)",
+      "WebFetch(domain:gamedev.stackexchange.com)",
+      "Bash(\"./build/Debug/Searching-game.exe\")"
     ],
     "deny": [],
-    "ask": []
+    "ask": [],
+    "additionalDirectories": [
+      "C:\\C\\Users\\Alex\\projects"
+    ]
   }
 }

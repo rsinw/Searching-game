@@ -75,7 +75,7 @@ Based on existing docs/pseudocode.md:
 - Cannot use raylib color macros (like RAYWHITE) - must define Color structs manually
 - Use `extern "C"` wrapper for raylib headers
 - Follow state machine pattern for game logic
-- 800x450 window resolution, 60 FPS target
+- 1280x720 window resolution, 60 FPS target
 
 ## Development Roadmap
 

@@ -1,0 +1,1225 @@
+// NewBattleSystem.cpp - Clean implementation following Soulseer structure exactly
+
+extern "C" {
+    #include "raylib.h"
+    #include "raymath.h"
+}
+
+#include <iostream>
+#include <vector>
+#include <memory>
+#include <string>
+#include <algorithm>
+#include <set>
+
+// Forward declarations
+class Element;
+class Unit;
+class Action;
+class Encounter;
+class Hitbox;
+
+// ==================== BASE ELEMENT CLASS (like Soulseer element pattern) ====================
+class Element {
+public:
+    bool remove = false;
+    Encounter* enc = nullptr;
+    
+    virtual ~Element() {}
+    virtual void update() = 0;
+    virtual void draw(Vector2 screen_pos) = 0;
+};
+
+// ==================== ANIMATION SYSTEM (based on Soulseer animation.py) ====================
+class Animation {
+public:
+    Texture2D spritesheet;
+    Rectangle frameRec;        // Rectangle for current frame (raylib approach)
+    int num_frames;
+    int current_frame;
+    int frame_duration;        // In frames (like Soulseer: 10 frames per animation frame)
+    int exact_timer;           // Frame counter
+    int frame_timer;           // Current frame timer
+    bool repeat;
+    int frame_width;           // Width of each frame
+    int frame_height;          // Height of each frame
+    
+    Animation() : num_frames(0), current_frame(0), frame_duration(10), exact_timer(0), frame_timer(0), repeat(true), frame_width(0), frame_height(0) {
+        spritesheet.id = 0;
+        frameRec = { 0.0f, 0.0f, 0.0f, 0.0f };
+    }
+    
+    Animation(const std::string& spritesheet_path, int numFrames, int frame_size = 135) 
+        : num_frames(numFrames), current_frame(0), frame_duration(10), exact_timer(0), frame_timer(0), repeat(true) {
+        
+        // Load spritesheet using proper raylib approach
+        spritesheet = LoadTexture(spritesheet_path.c_str());
+        if (spritesheet.id == 0) {
+            std::cout << "Failed to load animation: " << spritesheet_path << std::endl;
+            frame_width = frame_size;
+            frame_height = frame_size;
+            frameRec = { 0.0f, 0.0f, (float)frame_width, (float)frame_height };
+            return;
+        }
+        
+        // Calculate frame dimensions (assume horizontal sprite sheet)
+        frame_width = spritesheet.width / numFrames;
+        frame_height = spritesheet.height;
+        
+        // Initialize frame rectangle for first frame
+        frameRec = { 0.0f, 0.0f, (float)frame_width, (float)frame_height };
+        
+        std::cout << "Animation loaded: " << spritesheet_path << " (" << numFrames << " frames)" << std::endl;
+        std::cout << "  Frame size: " << frame_width << "x" << frame_height << std::endl;
+    }
+    
+    ~Animation() {
+        if (spritesheet.id != 0) {
+            UnloadTexture(spritesheet);
+        }
+    }
+    
+    void update() {
+        frame_timer += 1;
+        exact_timer += 1;
+        
+        if (frame_timer >= frame_duration) {
+            frame_timer = 0;
+            current_frame += 1;
+            if (current_frame >= num_frames) {
+                if (repeat) {
+                    current_frame = 0;
+                } else {
+                    current_frame = num_frames - 1;
+                }
+            }
+        }
+        
+        // Update frame rectangle to show current frame
+        frameRec.x = (float)(current_frame * frame_width);
+    }
+    
+    void set_frame(int frame) {
+        frame_timer = 0;
+        current_frame = frame;
+        frameRec.x = (float)(current_frame * frame_width);
+    }
+    
+    bool complete() {
+        return current_frame == num_frames - 1;
+    }
+    
+    void reset() {
+        current_frame = 0;
+        frame_timer = 0;
+        frameRec.x = 0.0f;
+    }
+    
+    // Draw method using proper raylib DrawTextureRec
+    void draw(Vector2 position, bool facing_right = true, float scale = 2.0f) {
+        if (spritesheet.id == 0) return;  // No texture loaded
+        
+        Rectangle destRec = { position.x, position.y, frame_width * scale, frame_height * scale };
+        Rectangle sourceRec = frameRec;
+        
+        // Flip horizontally if facing left
+        if (!facing_right) {
+            sourceRec.width = -sourceRec.width;
+        }
+        
+        DrawTexturePro(spritesheet, sourceRec, destRec, {0, 0}, 0.0f, WHITE);
+    }
+};
+
+// ==================== HITBOX SYSTEM (forward declaration - implemented after Unit) ====================
+class Hitbox;
+
+// ==================== ACTION SYSTEM (based on Soulseer action.py) ====================
+class Action {
+public:
+    Unit* unit;
+    Animation* anim;
+    Texture2D image;  // Ability icon
+    
+    // New system properties (based on pseudocode)
+    bool remove;
+    int cd;              // Cooldown in frames
+    double cd_timer;     // Current cooldown timer
+    int duration;        // Duration in frames
+    double duration_timer; // Current duration timer
+    double swing_frame;  // Frame when damage is dealt (like pseudocode)
+    
+    Action(Unit* u) : unit(u), remove(false), cd(60), cd_timer(0), duration(30), duration_timer(0), swing_frame(15) {
+        // Slash attack animation
+        anim = new Animation("assets/player/Attack1.png", 4);
+        anim->repeat = false;
+        
+        // Load ability icon
+        image = LoadTexture("assets/abilities/slash1.png");
+        if (image.id == 0) {
+            std::cout << "Failed to load action icon" << std::endl;
+        }
+        
+    }
+    
+    ~Action() {
+        if (anim) delete anim;
+        if (image.id != 0) UnloadTexture(image);
+    }
+    
+    // Method declarations (implementations after class definitions)
+    void update();
+    void on_swing(Unit* target);
+    void on_activation();
+    void on_cancel();
+    void on_finish();
+};
+
+// Enemy-specific auto-attack classes
+class SkeletonAttack : public Action {
+public:
+    SkeletonAttack(Unit* u) : Action(u) {
+        cd = 90;  // 1.5 second cooldown
+        duration = 48;  // 0.8 seconds duration (8 frames * 6 frame_duration)
+        swing_frame = 18;  // Frame 3 (0-indexed: 2) at 6 frame_duration per frame
+        
+        // Use skeleton attack animation
+        delete anim;  // Remove default animation
+        anim = new Animation("assets/enemies/skeleton/Attack.png", 8, 64);
+        anim->repeat = true;  // Allow attack animation to loop
+        anim->frame_duration = 6;  // 8 frames over 48 frame duration
+    }
+};
+
+class GoblinAttack : public Action {
+public:
+    GoblinAttack(Unit* u) : Action(u) {
+        cd = 120;  // 2 second cooldown  
+        duration = 48;
+        swing_frame = 24;  // Frame 4 (0-indexed: 3) at 6 frame_duration per frame
+        
+        delete anim;
+        anim = new Animation("assets/enemies/goblin/Attack.png", 8, 64);
+        anim->repeat = true;  // Allow attack animation to loop
+        anim->frame_duration = 6;
+    }
+};
+
+class MushroomAttack : public Action {
+public:
+    MushroomAttack(Unit* u) : Action(u) {
+        cd = 100;  // 1.67 second cooldown
+        duration = 48;
+        swing_frame = 18;  // Frame 3 (0-indexed: 2)
+        
+        delete anim;
+        anim = new Animation("assets/enemies/mushroom/Attack.png", 8, 64);
+        anim->repeat = true;  // Allow attack animation to loop
+        anim->frame_duration = 6;
+    }
+};
+
+class FlyingEyeAttack : public Action {
+public:
+    FlyingEyeAttack(Unit* u) : Action(u) {
+        cd = 80;  // 1.33 second cooldown
+        duration = 48;
+        swing_frame = 24;  // Frame 4 (0-indexed: 3)
+        
+        delete anim;
+        anim = new Animation("assets/enemies/flying_eye/Attack.png", 8, 64);
+        anim->repeat = true;  // Allow attack animation to loop  
+        anim->frame_duration = 6;
+    }
+};
+
+// ==================== UNIT SYSTEM (based on Soulseer unit.py) ====================
+class Unit : public Element {
+public:
+    // Core stats (like Soulseer)
+    int scale;
+    int hp;
+    int max_hp;
+    Rectangle rect;
+    Color hitbox_color;
+    Vector2 target_location;
+    bool has_target_location;
+    int speed;
+    float haste;
+    
+    // Movement (like Soulseer)
+    float dx;
+    float dy;
+    float move_dx;  // Clean movement variables for simplified system
+    float move_dy;
+    float knockback_dx;
+    float voluntary_dx;  // Track voluntary movement for facing direction
+    
+    // States
+    bool voluntary_movement;
+    Action* action;
+    
+    // Visual (like Soulseer)
+    float offsetx;
+    float offsety;
+    bool facing_right;
+    
+    // Animations (like Soulseer)
+    std::vector<Animation*> anims;
+    Animation* idle_anim;
+    Animation* move_anim;
+    Animation* hit_anim;
+    Animation* death_anim;
+    Animation* current_anim;
+    
+    // Actions (new system - single auto-attack)
+    std::unique_ptr<Action> auto_attack;
+    Action* current_action;
+    
+    // Combat (like Soulseer)
+    Unit* target_unit;
+    
+    // Encounter markers (like Soulseer)
+    int side;  // 0 = player, 1 = enemy
+    int remove_timer;
+    std::string type_name;
+    
+    // Healthbar (like Soulseer)
+    Color healthbar_color;
+    Rectangle healthbar_rect;
+    
+    Unit() {
+        // Initialize like Soulseer Unit.__init__
+        scale = 2;
+        hp = 100;
+        max_hp = 100;
+        
+        rect = {100.0f, 100.0f, (float)(40 * scale), (float)(50 * scale)};
+        hitbox_color = {0, 255, 0, 255};
+        
+        target_location = {0, 0};
+        has_target_location = false;
+        speed = 2;
+        haste = 1.0f;
+        
+        // Movement
+        dx = 0;
+        dy = 0;
+        move_dx = 0;
+        move_dy = 0;
+        knockback_dx = 0;
+        voluntary_dx = 0;
+        
+        // States
+        voluntary_movement = false;
+        action = nullptr;
+        
+        // Visual
+        offsetx = (float)(-50 * scale);
+        offsety = (float)(-40 * scale);
+        facing_right = true;
+        
+        // Animations (like Soulseer)
+        idle_anim = new Animation("assets/player/Idle.png", 10);
+        move_anim = new Animation("assets/player/Run.png", 6);
+        hit_anim = new Animation("assets/player/Get Hit.png", 3);
+        death_anim = new Animation("assets/player/Death.png", 9);
+        death_anim->repeat = false;
+        
+        anims = {idle_anim, move_anim, death_anim};
+        current_anim = idle_anim;
+        
+        // Single auto-attack action (Slash) - will be overridden by enemy subclasses
+        auto_attack = std::make_unique<Action>(this);
+        auto_attack->cd = 60;  // 1 second cooldown
+        current_action = nullptr;
+        
+        // Combat
+        target_unit = nullptr;
+        
+        // Encounter markers
+        side = 0;  // Default to player side
+        remove_timer = 0;
+        type_name = "Knight";
+        
+        // Initialize inherited Element members
+        remove = false;
+        enc = nullptr;
+        
+        // Healthbar
+        healthbar_color = {0, 255, 0, 255};
+        healthbar_rect = {rect.x, rect.y - 10, rect.width, 5};
+        
+        std::cout << "Unit created: " << type_name << " HP: " << hp << " with auto-attack" << std::endl;
+        if (auto_attack) {
+            std::cout << "  Auto-attack cooldown: " << auto_attack->cd << " frames" << std::endl;
+        }
+    }
+    
+    virtual ~Unit() {
+        delete idle_anim;
+        delete move_anim;
+        delete hit_anim;
+        delete death_anim;
+    }
+    
+    // Core methods (following Soulseer exactly)
+    void cancel_action() {
+        if (current_action) {
+            current_action->on_cancel();
+            current_action = nullptr;
+        }
+    }
+    
+    // Method declarations (implementations after class definitions)
+    void enemy_ai();
+    void core_logic();
+    
+    void update() {
+        // === COMPREHENSIVE DEBUG LOGGING ===
+        std::cout << "=== " << type_name << " (Side:" << side << ") DEBUG ===" << std::endl;
+        std::cout << "  HP: " << hp << "/" << max_hp << std::endl;
+        std::cout << "  Position: (" << rect.x << ", " << rect.y << ")" << std::endl;
+        
+        if (auto_attack) {
+            std::cout << "  Auto-attack: CD=" << auto_attack->cd_timer << "/" << auto_attack->cd 
+                      << " Duration=" << auto_attack->duration_timer << "/" << auto_attack->duration << std::endl;
+            if (auto_attack->anim) {
+                std::cout << "  Auto-attack anim: frame " << auto_attack->anim->current_frame 
+                          << "/" << auto_attack->anim->num_frames << " repeat=" << auto_attack->anim->repeat << std::endl;
+            }
+        }
+        
+        if (current_action) {
+            std::cout << "  Current action: ACTIVE - timer=" << current_action->duration_timer 
+                      << "/" << current_action->duration << " remove=" << current_action->remove << std::endl;
+        } else {
+            std::cout << "  Current action: NONE" << std::endl;
+        }
+        
+        if (target_unit) {
+            std::cout << "  Target: " << target_unit->type_name << " HP:" << target_unit->hp << std::endl;
+        } else {
+            std::cout << "  Target: NONE" << std::endl;
+        }
+        
+        std::cout << "  Current anim: " << (current_anim == idle_anim ? "IDLE" : 
+                                           current_anim == move_anim ? "MOVE" : 
+                                           current_anim == hit_anim ? "HIT" : 
+                                           current_anim == death_anim ? "DEATH" : "ACTION") << std::endl;
+        
+        // Update auto-attack cooldown timer
+        if (auto_attack && auto_attack->cd_timer > 0) {
+            auto_attack->cd_timer -= 1;
+            std::cout << "  Cooldown decremented to: " << auto_attack->cd_timer << std::endl;
+        }
+        
+        // Update current action if active
+        if (current_action) {
+            current_action->update();
+            if (current_action->remove) {
+                std::cout << "  *** ACTION REMOVED - setting current_action to nullptr ***" << std::endl;
+                current_action = nullptr;
+            }
+        }
+        
+        if (is_dead()) {
+            remove_timer += 1;
+            if (remove_timer > 3000) {  // Like Soulseer: 3000 frames
+                remove = true;
+            }
+            current_action = nullptr;
+            switch_anim(death_anim);
+            return;
+        }
+        
+        // Use clean core logic for all units
+        core_logic();
+            // If player has a target unit, try to attack or move to it
+            if (target_unit && target_unit->is_alive()) {
+                float dx = rect.x - target_unit->rect.x;
+                float dy = rect.y - target_unit->rect.y;
+                float distance = sqrt(dx*dx + dy*dy);
+                
+                // If in attack range and auto-attack ready
+                if (distance <= 120 && auto_attack && auto_attack->cd_timer <= 0 && !current_action) {
+                    std::cout << "  >>> STARTING AUTO-ATTACK: " << type_name << " -> " << target_unit->type_name << std::endl;
+                    current_action = auto_attack.get();
+                    current_action->on_activation();
+                    std::cout << type_name << " attacks " << target_unit->type_name << "!" << std::endl;
+                    switch_anim(current_action->anim);
+                }
+                // Move toward target if too far
+                else if (distance > 120 && !current_action) {
+                    Vector2 direction = {target_unit->rect.x - rect.x, target_unit->rect.y - rect.y};
+                    float dist = sqrt(direction.x*direction.x + direction.y*direction.y);
+                    if (dist > 0) {
+                        direction.x /= dist;
+                        direction.y /= dist;
+                        rect.x += direction.x * speed;
+                        rect.y += direction.y * speed;
+                        facing_right = (direction.x > 0);
+                        switch_anim(move_anim);
+                    }
+                }
+            }
+            // Simple movement to location
+            else if (has_target_location && !current_action) {
+                Vector2 current = {rect.x + rect.width/2, rect.y + rect.height};
+                Vector2 target = target_location;
+                Vector2 direction = {target.x - current.x, target.y - current.y};
+                float distance = sqrtf(direction.x * direction.x + direction.y * direction.y);
+                
+                if (distance <= speed) {
+                    // Reached target
+                    rect.x += target.x - current.x;
+                    rect.y += target.y - current.y;
+                    has_target_location = false;
+                    switch_anim(idle_anim);
+                } else {
+                    // Move towards target
+                    direction.x /= distance;
+                    direction.y /= distance;
+                    rect.x += direction.x * speed;
+                    rect.y += direction.y * speed;
+                    facing_right = (direction.x > 0);
+                    switch_anim(move_anim);
+                }
+            }
+            else if (!current_action) {
+                // Not moving and no action - idle
+                switch_anim(idle_anim);
+            }
+        }
+        
+        // Update animation
+        current_anim->update();
+    }
+    
+    void switch_anim(Animation* new_anim) {
+        if (current_anim == new_anim) return;
+        current_anim = new_anim;
+    }
+    
+    void move() {
+        // Movement with bounds checking (like Soulseer)
+        Vector2 current = {rect.x + rect.width/2, rect.y + rect.height};
+        Vector2 new_pos = {current.x + dx, current.y + dy};
+        
+        // Constrain to battlefield bounds (like Soulseer)
+        if (new_pos.y < 400 || new_pos.y > 720) {  // Hardcode battlefield bounds for now
+            dy = 0;
+        }
+        
+        new_pos = {current.x + dx, current.y + dy};
+        
+        // Update rect position (convert back from center bottom to top-left)
+        rect.x = new_pos.x - rect.width/2;
+        rect.y = new_pos.y - rect.height;
+        
+        dx = 0;
+        dy = 0;
+    }
+    
+    void set_target_unit(Unit* unit) {
+        target_unit = unit;
+    }
+    
+    void set_target_location(float x, float y) {
+        // Constrain y to battlefield bounds (like Soulseer)
+        if (y < 400) {  // Hardcode battlefield bounds for now
+            y = 400.0f;
+        }
+        target_location = {x, y};
+        has_target_location = true;
+    }
+    
+    // No longer needed - using auto-attack system
+    
+    bool is_alive() {
+        return hp > 0;
+    }
+    
+    bool is_dead() {
+        return hp <= 0;
+    }
+    
+    void take_damage(int damage) {
+        hp -= damage;
+        if (hp < 0) hp = 0;
+        std::cout << type_name << " took " << damage << " damage" << std::endl;
+    }
+    
+    void heal(int amount) {
+        hp += amount;
+        if (hp > max_hp) hp = max_hp;
+        std::cout << type_name << " healed " << amount << " hp" << std::endl;
+    }
+    
+    void draw(Vector2 screen_pos) {
+        // Draw unit using proper animation system
+        if (current_anim && current_anim->spritesheet.id != 0) {
+            Vector2 draw_pos = { rect.x + offsetx, rect.y + offsety };
+            current_anim->draw(draw_pos, facing_right, scale);
+        } else {
+            // Fallback to colored rectangle if no animation loaded
+            Color unit_color = get_unit_color();
+            Rectangle draw_rect = {
+                rect.x + offsetx, 
+                rect.y + offsety, 
+                rect.width, 
+                rect.height
+            };
+            DrawRectangleRec(draw_rect, unit_color);
+            DrawRectangleLinesEx(draw_rect, 2, {0, 0, 0, 255});
+        }
+        
+        // Draw unit name and HP
+        std::string debug_text = type_name + " HP:" + std::to_string(hp) + "/" + std::to_string(max_hp);
+        DrawText(debug_text.c_str(), (int)(rect.x + 10), (int)(rect.y + 20), 14, {255, 255, 255, 255});
+        
+        // Draw side indicator
+        std::string side_text = "Side:" + std::to_string(side);
+        DrawText(side_text.c_str(), (int)(rect.x + 10), (int)(rect.y + 35), 12, {255, 255, 0, 255});
+        
+        // Draw healthbar (like Soulseer)
+        if (!is_dead()) {
+            healthbar_rect = {rect.x, rect.y - 10, rect.width, 5};
+            float ratio = (float)hp / max_hp;
+            
+            // Background (red)
+            DrawRectangleRec(healthbar_rect, {255, 0, 0, 255});
+            
+            // Foreground (green)
+            Rectangle health_fill = {healthbar_rect.x, healthbar_rect.y, healthbar_rect.width * ratio, healthbar_rect.height};
+            DrawRectangleRec(health_fill, healthbar_color);
+        }
+    }
+    
+    virtual Color get_unit_color() {
+        return {100, 100, 255, 255};  // Default blue
+    }
+};
+
+// ==================== ENEMY CLASSES (like Soulseer Skeleton) ====================
+class Skeleton : public Unit {
+public:
+    Skeleton() : Unit() {
+        hp = 50;
+        max_hp = 50;
+        speed = 1;
+        type_name = "Skeleton";
+        
+        // Override animations with Skeleton-specific ones (64x64 frames)
+        delete idle_anim;
+        delete move_anim;
+        delete hit_anim;
+        delete death_anim;
+        
+        idle_anim = new Animation("assets/enemies/skeleton/Idle.png", 4, 64);
+        move_anim = new Animation("assets/enemies/skeleton/Walk.png", 4, 64);
+        hit_anim = new Animation("assets/enemies/skeleton/Take Hit.png", 4, 64);
+        death_anim = new Animation("assets/enemies/skeleton/Death.png", 4, 64);
+        death_anim->repeat = false;
+        
+        anims = {idle_anim, move_anim, hit_anim, death_anim};
+        current_anim = idle_anim;
+        
+        // Use skeleton-specific auto-attack
+        auto_attack = std::make_unique<SkeletonAttack>(this);
+        
+        std::cout << "Skeleton created with HP: " << hp << std::endl;
+    }
+    
+    Color get_unit_color() override {
+        return {200, 200, 200, 255};  // Light gray for skeleton
+    }
+};
+
+class Mushroom : public Unit {
+public:
+    Mushroom() : Unit() {
+        hp = 80;
+        max_hp = 80;
+        speed = 1;
+        type_name = "Mushroom";
+        
+        // Override animations
+        delete idle_anim;
+        delete move_anim;
+        delete hit_anim;
+        delete death_anim;
+        
+        idle_anim = new Animation("assets/enemies/mushroom/Idle.png", 4, 64);
+        move_anim = new Animation("assets/enemies/mushroom/Run.png", 4, 64);
+        hit_anim = new Animation("assets/enemies/mushroom/Take Hit.png", 4, 64);
+        death_anim = new Animation("assets/enemies/mushroom/Death.png", 4, 64);
+        death_anim->repeat = false;
+        
+        anims = {idle_anim, move_anim, hit_anim, death_anim};
+        current_anim = idle_anim;
+        
+        // Use mushroom-specific auto-attack
+        auto_attack = std::make_unique<MushroomAttack>(this);
+        
+        std::cout << "Mushroom created with HP: " << hp << std::endl;
+    }
+    
+    Color get_unit_color() override {
+        return {150, 0, 150, 255};  // Purple for mushroom
+    }
+};
+
+// ==================== ENCOUNTER SYSTEM (based on Soulseer encounter.py) ====================
+class Encounter {
+public:
+    int y_bound;
+    int x_bound;
+    std::vector<Element*> elements;  // All game objects (units, hitboxes, etc.)
+    std::vector<Unit*> units;        // Just units
+    int timer;
+    Unit* selected_unit;
+    bool over;
+    int over_timer;
+    int side_win;
+    Texture2D bg_image;
+    
+    Encounter() {
+        y_bound = 400;
+        x_bound = 1200;
+        timer = 0;
+        selected_unit = nullptr;
+        over = false;
+        over_timer = 300;
+        side_win = -1;
+        
+        // Load background
+        bg_image = LoadTexture("assets/backgrounds/battle.png");
+        if (bg_image.id == 0) {
+            std::cout << "Warning: Could not load battle background" << std::endl;
+        }
+        
+        // Initialize units (like Soulseer)
+        add_unit(new Unit(), 0);  // Add player unit
+        
+        if (!return_player_group().empty()) {
+            selected_unit = return_player_group()[0];
+            selected_unit->speed = 3;
+        }
+        
+        // Add some enemies for testing
+        add_unit(new Skeleton(), 1);
+        add_unit(new Mushroom(), 1);
+        
+        std::cout << "Encounter created with " << units.size() << " units" << std::endl;
+        std::cout << "Player units: " << return_player_group().size() << std::endl;
+        std::cout << "Enemy units: " << return_enemy_group().size() << std::endl;
+        if (selected_unit) {
+            std::cout << "Selected unit: " << selected_unit->type_name << " (Side: " << selected_unit->side << ")" << std::endl;
+        }
+        
+        // Show initial positions
+        for (auto* unit : units) {
+            std::cout << unit->type_name << " (Side:" << unit->side << ") at (" << unit->rect.x << ", " << unit->rect.y << ")" << std::endl;
+        }
+    }
+    
+    ~Encounter() {
+        for (auto* unit : units) {
+            delete unit;
+        }
+        if (bg_image.id != 0) {
+            UnloadTexture(bg_image);
+        }
+    }
+    
+    void add_unit(Unit* unit, int side = 0) {
+        unit->side = side;
+        unit->enc = this;
+        unit->remove = false;
+        units.push_back(unit);
+        elements.push_back(unit);
+        
+        // Position units (like Soulseer) 
+        if (unit->side == 1) {  // Enemy
+            // Position enemies MUCH closer for testing
+            unit->rect.x = (float)(300 + (rand() % 50));
+            unit->rect.y = (float)(y_bound + (rand() % 200));
+        } else {  // Player
+            unit->rect.x = (float)(y_bound / 2);
+            unit->rect.y = (float)(x_bound / 2);
+        }
+    }
+    
+    void update() {
+        remove_marked_elements();
+        
+        if (over && over_timer > 0) {
+            over_timer -= 1;
+            if (over_timer <= 0) {
+                // Return to main menu (TODO)
+            }
+        }
+        
+        if (over) return;
+        
+        // Update all elements (units and hitboxes)
+        for (auto* element : elements) {
+            if (element) {
+                element->update();
+            }
+        }
+        
+        // Check win conditions (like Soulseer)
+        if (!is_side_alive(return_player_group())) {
+            over = true;
+            side_win = 1;  // Enemies win
+            std::cout << "Enemies win!" << std::endl;
+        } else if (!is_side_alive(return_enemy_group())) {
+            over = true;
+            side_win = 0;  // Players win
+            std::cout << "Player wins!" << std::endl;
+        }
+    }
+    
+    void remove_marked_elements() {
+        // Remove from units list
+        auto it = std::remove_if(units.begin(), units.end(), [](Unit* unit) {
+            return unit->remove;
+        });
+        units.erase(it, units.end());
+        
+        // Remove and delete from elements list
+        auto it2 = std::remove_if(elements.begin(), elements.end(), [](Element* element) {
+            if (element->remove) {
+                delete element;
+                return true;
+            }
+            return false;
+        });
+        elements.erase(it2, elements.end());
+    }
+    
+    std::vector<Unit*> return_player_group() {
+        std::vector<Unit*> temp_list;
+        for (auto* unit : units) {
+            if (unit->side == 0) {
+                temp_list.push_back(unit);
+            }
+        }
+        return temp_list;
+    }
+    
+    std::vector<Unit*> return_enemy_group() {
+        std::vector<Unit*> temp_list;
+        for (auto* unit : units) {
+            if (unit->side == 1) {
+                temp_list.push_back(unit);
+            }
+        }
+        return temp_list;
+    }
+    
+    bool is_side_alive(const std::vector<Unit*>& group) {
+        for (auto* unit : group) {
+            if (unit->is_alive()) {
+                return true;
+            }
+        }
+        return false;
+    }
+    
+    void draw() {
+        // Draw background
+        if (bg_image.id != 0) {
+            DrawTexture(bg_image, 0, 0, WHITE);
+        } else {
+            ClearBackground({50, 50, 80, 255});  // Dark blue background
+        }
+        
+        // Draw all elements (units and hitboxes)
+        for (auto* element : elements) {
+            element->draw({0, 0});
+        }
+        
+        // Draw action UI (like Soulseer)
+        draw_action_ui();
+        
+        if (over) {
+            const char* win_text = (side_win == 0) ? "Player Wins!" : "Enemies Win!";
+            DrawText(win_text, 400, 200, 60, {255, 255, 255, 255});
+        }
+    }
+    
+    void draw_action_ui() {
+        if (!selected_unit) return;
+        
+        int spacing = 10;
+        int square_size = 100;
+        int x_start = 10;
+        int y_start = 10;
+        
+        // Draw single auto-attack UI
+        if (selected_unit->auto_attack) {
+            int x = x_start;
+            int y = y_start;
+            
+            // Draw action background
+            DrawRectangle(x, y, square_size, square_size, {100, 100, 100, 255});
+            DrawRectangleLines(x, y, square_size, square_size, {255, 255, 255, 255});
+            
+            // Draw auto-attack icon (if available)
+            if (selected_unit->auto_attack->image.id != 0) {
+                DrawTexturePro(selected_unit->auto_attack->image, 
+                              {0, 0, (float)selected_unit->auto_attack->image.width, (float)selected_unit->auto_attack->image.height},
+                              {(float)x, (float)y, (float)square_size, (float)square_size},
+                              {0, 0}, 0.0f, WHITE);
+            }
+            
+            // Draw cooldown overlay
+            if (selected_unit->auto_attack->cd_timer > 0) {
+                float cd_ratio = (float)selected_unit->auto_attack->cd_timer / selected_unit->auto_attack->cd;
+                int overlay_height = (int)(square_size * cd_ratio);
+                DrawRectangle(x, y, square_size, overlay_height, {100, 100, 100, 150});
+            }
+        }
+    }
+};
+
+// ==================== HITBOX IMPLEMENTATION (now that Unit is defined) ====================
+class Hitbox : public Element {
+public:
+    Rectangle rect;
+    Texture2D image;
+    std::set<Unit*> units_hit;
+    int damage;
+    bool draw_hitbox;
+    Unit* unit;
+    int width;
+    int height;
+    
+    // Timing (like Soulseer)
+    int wait;
+    int duration;
+    
+    Hitbox(int x, int y, int w, int h) : width(w), height(h), damage(10), draw_hitbox(false), wait(10), duration(30) {
+        std::cout << "Hitbox constructor called (" << w << "x" << h << ")" << std::endl;
+        rect = {0, 0, 0, 0};  // Will be set later
+        image.id = 0;
+        unit = nullptr;
+        remove = false;  // Initialize inherited member
+        enc = nullptr;   // Initialize inherited member
+        std::cout << "Hitbox constructor finished" << std::endl;
+    }
+    
+    void on_hit(Unit* hit_unit) {
+        std::cout << "=== HITBOX ON_HIT START ===" << std::endl;
+        std::cout << "Attacker: " << (unit ? unit->type_name : "NULL") << std::endl;
+        std::cout << "Target: " << (hit_unit ? hit_unit->type_name : "NULL") << std::endl;
+        std::cout << "Damage: " << damage << std::endl;
+        
+        if (!hit_unit) {
+            std::cout << "ERROR: hit_unit is NULL!" << std::endl;
+            return;
+        }
+        
+        if (!unit) {
+            std::cout << "ERROR: attacking unit is NULL!" << std::endl;
+            return;
+        }
+        
+        // Following Soulseer's on_hit logic exactly
+        std::cout << "Taking damage..." << std::endl;
+        hit_unit->take_damage(damage);
+        std::cout << "Hit " << hit_unit->type_name << " for " << damage << " damage" << std::endl;
+        
+        // Knockback logic (like Soulseer)
+        std::cout << "Applying knockback..." << std::endl;
+        if (unit->rect.x < hit_unit->rect.x) {
+            hit_unit->knockback_dx += 5;
+            std::cout << "knocked back right" << std::endl;
+        } else {
+            hit_unit->knockback_dx -= 5;
+            std::cout << "knocked back left" << std::endl;
+        }
+        
+        // Heal attacker (like Soulseer)
+        std::cout << "Healing attacker..." << std::endl;
+        unit->heal(10);
+        std::cout << "=== HITBOX ON_HIT END ===" << std::endl;
+    }
+    
+    void update() override {
+        std::cout << "Hitbox update called, wait=" << wait << std::endl;
+        
+        // Following Soulseer's hitbox update logic exactly
+        if (wait > 0) {
+            wait -= 1;
+            draw_hitbox = false;
+            return;
+        }
+        
+        if (wait == 0) {
+            rect = {0, 0, (float)width, (float)height};
+            
+            // Position hitbox properly aligned with unit bottom (like Soulseer)
+            if (unit->facing_right) {
+                // To the right of the unit
+                rect.x = unit->rect.x + unit->rect.width;
+                rect.y = unit->rect.y + unit->rect.height - height;  // Bottom-aligned
+            } else {
+                // To the left of the unit  
+                rect.x = unit->rect.x - width;
+                rect.y = unit->rect.y + unit->rect.height - height;  // Bottom-aligned
+            }
+            
+            wait = -1;
+            std::cout << "Hitbox positioned at (" << rect.x << ", " << rect.y << ") size(" << width << "x" << height << ")" << std::endl;
+            std::cout << "Unit at (" << unit->rect.x << ", " << unit->rect.y << ") size(" << unit->rect.width << "x" << unit->rect.height << ")" << std::endl;
+        }
+        
+        draw_hitbox = true;
+        
+        // Check collision with enemy units (like Soulseer)
+        if (!enc) {
+            std::cout << "ERROR: Hitbox enc is NULL!" << std::endl;
+            return;
+        }
+        
+        std::cout << "Checking hitbox collision with " << enc->units.size() << " units" << std::endl;
+        
+        for (auto* enemy_unit : enc->units) {
+            if (!enemy_unit) {
+                std::cout << "WARNING: null enemy unit found!" << std::endl;
+                continue;
+            }
+            
+            if (enemy_unit->side == unit->side) {
+                std::cout << "Skipping same side unit: " << enemy_unit->type_name << std::endl;
+                continue;  // Skip same side
+            }
+            
+            Rectangle enemy_rect = {enemy_unit->rect.x, enemy_unit->rect.y, enemy_unit->rect.width, enemy_unit->rect.height};
+            std::cout << "Checking collision with " << enemy_unit->type_name << " at (" << enemy_rect.x << ", " << enemy_rect.y << ")" << std::endl;
+            
+            if (CheckCollisionRecs(rect, enemy_rect) && units_hit.find(enemy_unit) == units_hit.end()) {
+                std::cout << "HIT DETECTED! " << unit->type_name << " hits " << enemy_unit->type_name << std::endl;
+                on_hit(enemy_unit);
+                units_hit.insert(enemy_unit);
+            }
+        }
+        
+        duration -= 1;
+        if (duration <= 0) {
+            remove = true;
+        }
+    }
+    
+    void draw(Vector2 screen_pos) override {
+        if (draw_hitbox) {
+            // Draw red hitbox for debugging (like Soulseer's red fill)
+            DrawRectangleRec(rect, {255, 0, 0, 100});  // Semi-transparent red
+            DrawRectangleLinesEx(rect, 2, {255, 0, 0, 255});  // Solid red border
+            
+            // Draw hitbox info for debugging
+            DrawText(("DMG:" + std::to_string(damage)).c_str(), (int)rect.x, (int)rect.y - 20, 12, {255, 255, 255, 255});
+        }
+    }
+};
+
+// ==================== METHOD IMPLEMENTATIONS ====================
+
+// Action method implementations
+void Action::update() {
+    duration_timer += 1;
+    
+    // Deal damage at swing frame and initiate cooldown
+    if (duration_timer == swing_frame) {
+        on_swing(unit->target_unit);
+        cd_timer = cd;  // Start cooldown on swing as specified
+    }
+    
+    // Finish action when duration complete
+    if (duration_timer >= duration) {
+        std::cout << ">>> ACTION COMPLETING for " << unit->type_name << " (timer=" << duration_timer << "/" << duration << ")" << std::endl;
+        remove = true;
+        on_finish();
+    }
+}
+
+void Action::on_swing(Unit* target) {
+    if (!target) return;
+    
+    // Check range (simple distance check)
+    float dx = unit->rect.x - target->rect.x;
+    float dy = unit->rect.y - target->rect.y;
+    float distance = sqrt(dx*dx + dy*dy);
+    
+    if (distance > 100) { // Out of range
+        std::cout << unit->type_name << " attack out of range!" << std::endl;
+        return;
+    }
+    
+    // Deal damage
+    int damage = 10; // Base damage
+    target->take_damage(damage);
+    std::cout << unit->type_name << " hit " << target->type_name << " for " << damage << " damage" << std::endl;
+}
+
+void Action::on_activation() {
+    duration_timer = 0;
+    if (anim) {
+        anim->reset();
+    }
+}
+
+void Action::on_cancel() {
+    // Don't set cooldown on cancel as specified
+    duration_timer = 0;
+    if (anim) anim->reset();
+}
+
+void Action::on_finish() {
+    duration_timer = 0;
+    if (anim) anim->reset();
+}
+
+// Unit method implementations
+void Unit::enemy_ai() {
+    if (!enc) return;
+    
+    // Find closest player
+    Unit* closest_player = nullptr;
+    float closest_distance = 999999;
+    
+    for (auto* unit : enc->units) {
+        if (unit->side == 0 && unit->is_alive()) { // Player side
+            float dx = rect.x - unit->rect.x;
+            float dy = rect.y - unit->rect.y;
+            float distance = sqrt(dx*dx + dy*dy);
+            
+            if (distance < closest_distance) {
+                closest_distance = distance;
+                closest_player = unit;
+            }
+        }
+    }
+    
+    if (!closest_player) return;
+    
+    target_unit = closest_player;
+    
+    // If in attack range and auto-attack is ready
+    if (closest_distance <= 120 && auto_attack && auto_attack->cd_timer <= 0 && !current_action) {
+        // Start auto-attack (only once!)
+        std::cout << "  >>> ENEMY AI STARTING AUTO-ATTACK: " << type_name << " -> " << closest_player->type_name << std::endl;
+        current_action = auto_attack.get();
+        current_action->on_activation();
+        std::cout << type_name << " attacks " << closest_player->type_name << "!" << std::endl;
+        switch_anim(current_action->anim);
+    }
+    // If attacking, check if still in range
+    else if (current_action) {
+        // Cancel attack if target moved out of range
+        if (closest_distance > 120) {
+            std::cout << "  >>> CANCELLING ATTACK - target out of range: " << closest_distance << std::endl;
+            cancel_action();
+        } else {
+            // Keep attack animation running
+        }
+    }
+    // Move toward target if too far
+    else if (closest_distance > 120) {
+        // Simple movement toward player
+        float dx = closest_player->rect.x - rect.x;
+        float dy = closest_player->rect.y - rect.y;
+        float distance = sqrt(dx*dx + dy*dy);
+        
+        if (distance > 0) {
+            float move_x = (dx / distance) * speed;
+            float move_y = (dy / distance) * speed;
+            
+            rect.x += move_x;
+            rect.y += move_y;
+            
+            facing_right = (dx > 0);
+            switch_anim(move_anim);
+        }
+    }
+    else {
+        // In range but waiting for cooldown
+        switch_anim(idle_anim);
+    }
+}
+
+// Clean core logic following the fundamental flow
+void Unit::core_logic() {
+    // Enemy AI - find player target
+    if (side == 1) {
+        if (!enc) return;
+        
+        // Find closest player
+        Unit* closest_player = nullptr;
+        float closest_distance = FLT_MAX;
+        for (auto* unit : enc->units) {
+            if (unit->side == 0 && unit->hp > 0) {
+                float dx = rect.x - unit->rect.x;
+                float dy = rect.y - unit->rect.y;
+                float distance = sqrt(dx*dx + dy*dy);
+                if (distance < closest_distance) {
+                    closest_distance = distance;
+                    closest_player = unit;
+                }
+            }
+        }
+        target_unit = closest_player;
+    }
+    
+    // Core flow: no target -> idle
+    if (!target_unit || target_unit->hp <= 0) {
+        move_dx = 0; 
+        move_dy = 0;
+        switch_anim(idle_anim);
+        return;
+    }
+    
+    // Calculate distance to target
+    float dx = target_unit->rect.x - rect.x;
+    float dy = target_unit->rect.y - rect.y;
+    float distance = sqrt(dx*dx + dy*dy);
+    
+    // During auto attack - check range and cancel if needed
+    if (current_action) {
+        if (distance > 120) {
+            // Out of range - cancel and remove cooldown
+            current_action->on_cancel();
+            current_action = nullptr;
+            auto_attack->cd_timer = 0;  // Remove cooldown as specified
+        }
+        return; // Keep attacking if in range
+    }
+    
+    // Check if auto attack in range
+    if (distance <= 120) {
+        // In range - check BOTH conditions: no current action AND not on cooldown
+        if (auto_attack && auto_attack->cd_timer <= 0) {
+            // Initiate auto attack (both conditions met)
+            current_action = auto_attack.get();
+            current_action->on_activation();
+            switch_anim(current_action->anim);
+        } else {
+            // In range but on cooldown - idle
+            move_dx = 0;
+            move_dy = 0;
+            switch_anim(idle_anim);
+        }
+    } else {
+        // Not in range - move towards enemy
+        dx = dx / distance; // normalize
+        dy = dy / distance;
+        move_dx = dx * speed;
+        move_dy = dy * speed;
+        facing_right = (dx > 0);
+        switch_anim(move_anim);
+    }
+}
